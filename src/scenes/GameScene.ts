@@ -11,6 +11,7 @@ import { ENEMY_DATA, EnemyType } from '../data/enemy-data';
 import { PLACEMENT_SLOTS, PATH_POINTS, GATE_POSITION, PlacementSlot } from '../data/map-data';
 import { TowerEntity } from '../entities/Tower';
 import { EnemyEntity } from '../entities/Enemy';
+import { shouldDismissPanels } from '../logic/input-policy';
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState;
@@ -54,10 +55,16 @@ export class GameScene extends Phaser.Scene {
     this.drawStartWaveButton();
     this.drawWaveStatus();
 
-    this.input.on('pointerdown', () => this.closePanels());
   }
 
   private drawMap(): void {
+    this.add.rectangle(180, 320, 360, 520, 0x000000, 0)
+      .setInteractive()
+      .on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+        pointer.event.stopPropagation();
+        if (shouldDismissPanels('background')) this.closePanels();
+      });
+
     const gfx = this.add.graphics();
     gfx.lineStyle(8, 0x1a1a3e, 1);
     gfx.beginPath();
