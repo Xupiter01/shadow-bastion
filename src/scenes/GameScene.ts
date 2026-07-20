@@ -3,9 +3,9 @@ import {
   createGameState, GameState, placeTower, upgradeTower, sellTower,
   PlacedTower, ActiveEnemy,
 } from '../logic/game-state';
-import { createWaveSpawner, WaveSpawner } from '../logic/wave-system';
+import { createWaveSpawner, WaveSpawner, applyWaveHpScale } from '../logic/wave-system';
 import { findTarget, distance } from '../logic/targeting';
-import { applyDamage, applySlow } from '../logic/damage';
+import { applyDamage, applySlow, grantEnemyReward } from '../logic/damage';
 import { TOWER_LEVELS, SLOW_FACTOR, SLOW_DURATION, CANNON_SPLASH_RADIUS, TowerType } from '../data/tower-data';
 import { ENEMY_DATA, EnemyType } from '../data/enemy-data';
 import { PLACEMENT_SLOTS, PATH_POINTS, GATE_POSITION, PlacementSlot } from '../data/map-data';
@@ -333,6 +333,8 @@ export class GameScene extends Phaser.Scene {
           p.event.stopPropagation();
           const result = upgradeTower(this.state, tower.id);
           if (result.success) {
+            const entity = this.towerEntities.get(tower.id);
+            if (entity) entity.updateVisuals();
             this.updateHUD();
             this.closePanels();
           }
@@ -406,6 +408,7 @@ export class GameScene extends Phaser.Scene {
       alive: true,
     };
     this.state.enemies.push(enemy);
+    applyWaveHpScale(enemy, this.state.wave);
     const entity = new EnemyEntity(this, enemy);
     this.enemyEntities.set(enemy.id, entity);
   }
@@ -463,10 +466,13 @@ export class GameScene extends Phaser.Scene {
       if (entity) entity.update();
     }
 
-    // Clean up dead enemies
+    // Clean up dead enemies and grant rewards
     for (const [id, entity] of this.enemyEntities) {
       const enemy = this.state.enemies.find(e => e.id === id);
       if (!enemy || !enemy.alive) {
+        if (enemy && enemy.hp <= 0) {
+          grantEnemyReward(this.state, enemy);
+        }
         entity.destroy();
         this.enemyEntities.delete(id);
       }

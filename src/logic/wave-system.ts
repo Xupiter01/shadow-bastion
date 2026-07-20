@@ -1,5 +1,13 @@
 import { WAVES } from '../data/wave-data';
-import { GameState } from './game-state';
+import { GameState, ActiveEnemy } from './game-state';
+
+export const WAVE_HP_MULTIPLIERS = [1.00, 1.20, 1.45, 1.75, 2.10];
+
+export function applyWaveHpScale(enemy: ActiveEnemy, wave: number): void {
+  const multiplier = WAVE_HP_MULTIPLIERS[wave - 1] ?? 1.0;
+  enemy.hp = Math.round(enemy.hp * multiplier * 100) / 100;
+  enemy.maxHp = Math.round(enemy.maxHp * multiplier * 100) / 100;
+}
 
 export interface SpawnEntry {
   type: string;

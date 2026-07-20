@@ -32,6 +32,14 @@ export class TowerEntity {
     this.rangeCircle.setVisible(visible);
   }
 
+  updateVisuals(): void {
+    const levelData = TOWER_LEVELS[this.tower.type][this.tower.level - 1];
+    this.sprite.setFillStyle(levelData.stats.color);
+    this.rangeCircle.setRadius(levelData.stats.range);
+    this.rangeCircle.setFillStyle(levelData.stats.color, 0.1);
+    this.rangeCircle.setStrokeStyle(1, levelData.stats.color, 0.3);
+  }
+
   destroy(): void {
     this.sprite.destroy();
     this.rangeCircle.destroy();
