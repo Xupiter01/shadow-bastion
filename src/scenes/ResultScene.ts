@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { updateHighestCompleted } from '../logic/map-progression';
+import { getResultDisplay } from '../logic/heart-display';
 
 export class ResultScene extends Phaser.Scene {
   constructor() {
@@ -17,21 +18,14 @@ export class ResultScene extends Phaser.Scene {
 
     this.add.rectangle(180, 320, 360, 640, 0x0a0a1a);
 
-    if (won) {
-      this.add.text(180, 220, 'VICTORY!', {
-        fontSize: '36px', color: '#27ae60', fontFamily: 'monospace',
-      }).setOrigin(0.5);
-      this.add.text(180, 270, 'The Shadow Kingdom stands!', {
-        fontSize: '14px', color: '#bdc3c7', fontFamily: 'monospace',
-      }).setOrigin(0.5);
-    } else {
-      this.add.text(180, 220, 'DEFEATED', {
-        fontSize: '36px', color: '#c0392b', fontFamily: 'monospace',
-      }).setOrigin(0.5);
-      this.add.text(180, 270, 'The shadows have fallen...', {
-        fontSize: '14px', color: '#bdc3c7', fontFamily: 'monospace',
-      }).setOrigin(0.5);
-    }
+    const display = getResultDisplay(won);
+
+    this.add.text(180, 220, display.title, {
+      fontSize: '28px', color: display.titleColor, fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    this.add.text(180, 270, display.subtitle, {
+      fontSize: '14px', color: '#bdc3c7', fontFamily: 'monospace',
+    }).setOrigin(0.5);
 
     const restartBtn = this.add.rectangle(180, 380, 160, 50, 0x34495e)
       .setStrokeStyle(2, 0x5dade2)

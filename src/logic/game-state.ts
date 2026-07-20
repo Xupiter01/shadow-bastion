@@ -1,5 +1,7 @@
 import { TOWER_LEVELS, TowerType } from '../data/tower-data';
 
+export const MAX_HEARTS = 10;
+
 export type GamePhase = 'prep' | 'wave' | 'result';
 export type GameResult = null | 'win' | 'lose';
 

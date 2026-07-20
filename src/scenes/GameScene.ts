@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import {
   createGameState, GameState, placeTower, upgradeTower, sellTower,
-  PlacedTower, ActiveEnemy,
+  PlacedTower, ActiveEnemy, enemyReachedGate, MAX_HEARTS,
 } from '../logic/game-state';
 import { createWaveSpawner, WaveSpawner, applyWaveHpScale } from '../logic/wave-system';
 import { findTarget, distance } from '../logic/targeting';
@@ -16,9 +16,10 @@ import { EnemyEntity } from '../entities/Enemy';
 import { ProjectileEntity } from '../entities/Projectile';
 import {
   createMuzzleFlash, createCannonExplosion, createFrostImpact,
-  createFloatingText, createSlowEffect,
+  createFloatingText, createSlowEffect, createCastleHitEffect,
 } from '../rendering/PixelEffects';
 import { shouldDismissPanels } from '../logic/input-policy';
+import { formatHearts, formatLives, getCastleHitFeedback } from '../logic/heart-display';
 
 interface ManagedProjectile {
   entity: ProjectileEntity;
@@ -152,8 +153,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateHUD(): void {
+    const hearts = formatHearts(this.state.lives, MAX_HEARTS);
+    const livesNum = formatLives(this.state.lives, MAX_HEARTS);
     this.hudText.setText(
-      `Lives: ${this.state.lives}  |  Essence: ${this.state.essence}  |  Wave: ${this.state.wave}/5`
+      `${hearts} ${livesNum}  |  Essence: ${this.state.essence}  |  Wave: ${this.state.wave}/5`
     );
   }
 
@@ -482,13 +485,12 @@ export class GameScene extends Phaser.Scene {
       }
 
       if (enemy.pathIndex >= road.length - 1) {
-        enemy.alive = false;
-        this.state.lives -= enemy.livesCost;
-        if (this.state.lives <= 0) {
-          this.state.gameOver = true;
-          this.state.won = false;
-          this.state.phase = 'result';
-        }
+        const livesCost = enemy.livesCost;
+        enemyReachedGate(this.state, enemy.id);
+        const castle = this.activeMap.castle;
+        createCastleHitEffect(this, castle.x, castle.y);
+        const fb = getCastleHitFeedback(livesCost);
+        createFloatingText(this, castle.x, castle.y - 20, fb.text, fb.color, 12);
       }
 
       const entity = this.enemyEntities.get(enemy.id);

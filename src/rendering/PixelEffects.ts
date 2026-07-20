@@ -190,3 +190,20 @@ export function createSlowEffect(scene: Phaser.Scene, x: number, y: number): voi
     onComplete: () => circle.destroy(),
   });
 }
+
+export function createCastleHitEffect(scene: Phaser.Scene, castleX: number, castleY: number): void {
+  const flash = scene.add.graphics();
+  flash.setDepth(80);
+  flash.fillStyle(0xff0000, 0.4);
+  flash.fillRect(0, 0, 60, 16);
+  flash.setPosition(castleX - 30, castleY - 8);
+
+  scene.tweens.add({
+    targets: flash,
+    alpha: 0,
+    duration: 200,
+    onComplete: () => flash.destroy(),
+  });
+
+  scene.cameras.main.shake(120, 0.008);
+}

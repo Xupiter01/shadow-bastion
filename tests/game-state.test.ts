@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createGameState, GameState, placeTower, upgradeTower, sellTower, enemyReachedGate, restartGame } from '../src/logic/game-state';
+import { createGameState, GameState, placeTower, upgradeTower, sellTower, enemyReachedGate, restartGame, MAX_HEARTS } from '../src/logic/game-state';
 
 describe('GameState', () => {
   let state: GameState;
@@ -105,6 +105,61 @@ describe('GameState', () => {
     expect(state.wave).toBe(1);
     expect(state.towers).toEqual([]);
     expect(state.enemies).toEqual([]);
+    expect(state.gameOver).toBe(false);
+  });
+
+  it('MAX_HEARTS is exported and equals 10', () => {
+    expect(MAX_HEARTS).toBe(10);
+  });
+
+  it('createGameState initializes lives to MAX_HEARTS', () => {
+    const fresh = createGameState();
+    expect(fresh.lives).toBe(MAX_HEARTS);
+  });
+
+  it('enemyReachedGate deducts brute livesCost=2', () => {
+    state.enemies.push({
+      id: 0, type: 'brute', hp: 120, maxHp: 120, speed: 30,
+      reward: 25, livesCost: 2, pathIndex: 10, pathProgress: 1,
+      slowTimer: 0, alive: true,
+    });
+    enemyReachedGate(state, 0);
+    expect(state.lives).toBe(MAX_HEARTS - 2);
+    expect(state.gameOver).toBe(false);
+  });
+
+  it('enemyReachedGate triggers gameOver exactly at 0', () => {
+    state.lives = 1;
+    state.enemies.push({
+      id: 0, type: 'shade', hp: 30, maxHp: 30, speed: 60,
+      reward: 10, livesCost: 1, pathIndex: 10, pathProgress: 1,
+      slowTimer: 0, alive: true,
+    });
+    enemyReachedGate(state, 0);
+    expect(state.lives).toBe(0);
+    expect(state.gameOver).toBe(true);
+    expect(state.won).toBe(false);
+    expect(state.phase).toBe('result');
+  });
+
+  it('enemyReachedGate sets phase to result on game over', () => {
+    expect(state.phase).toBe('prep');
+    state.lives = 1;
+    state.enemies.push({
+      id: 0, type: 'captain', hp: 300, maxHp: 300, speed: 25,
+      reward: 100, livesCost: 3, pathIndex: 10, pathProgress: 1,
+      slowTimer: 0, alive: true,
+    });
+    enemyReachedGate(state, 0);
+    expect(state.phase).toBe('result');
+    expect(state.gameOver).toBe(true);
+    expect(state.won).toBe(false);
+  });
+
+  it('restartGame resets lives to MAX_HEARTS after depletion', () => {
+    state.lives = 2;
+    restartGame(state);
+    expect(state.lives).toBe(MAX_HEARTS);
     expect(state.gameOver).toBe(false);
   });
 });
