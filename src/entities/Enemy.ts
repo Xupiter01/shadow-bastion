@@ -2,9 +2,11 @@ import Phaser from 'phaser';
 import { ActiveEnemy } from '../logic/game-state';
 import { ENEMY_DATA, EnemyType } from '../data/enemy-data';
 import { PATH_POINTS } from '../data/map-data';
+import { getEnemyAsset } from '../data/asset-registry';
 
 export class EnemyEntity {
   graphics: Phaser.GameObjects.Graphics;
+  sprite?: Phaser.GameObjects.Image;
   hpBarBg: Phaser.GameObjects.Graphics;
   hpBar: Phaser.GameObjects.Graphics;
   private enemy: ActiveEnemy;
@@ -20,6 +22,18 @@ export class EnemyEntity {
     this.hpBarBg.setDepth(21);
     this.hpBar = scene.add.graphics();
     this.hpBar.setDepth(22);
+
+    const enemyType = enemy.type as EnemyType;
+    const asset = getEnemyAsset(enemyType);
+    const textureKey = asset.textureKey;
+    if (scene.textures.exists(textureKey)) {
+      this.sprite = scene.add.image(0, 0, textureKey);
+      this.sprite.setDepth(20);
+      this.sprite.setDisplaySize(asset.displayWidth, asset.displayHeight);
+      this.sprite.setOrigin(0.5);
+      this.graphics.setVisible(false);
+    }
+
     this.drawEnemy();
   }
 
@@ -36,12 +50,14 @@ export class EnemyEntity {
   update(delta: number): void {
     const pos = this.getWorldPos();
     this.graphics.setPosition(pos.x, pos.y);
+    this.sprite?.setPosition(pos.x, pos.y);
 
     if (this.hitFlashTimer > 0) {
       this.hitFlashTimer -= delta;
-      this.graphics.setAlpha(0.7 + Math.sin(this.hitFlashTimer * 0.03) * 0.3);
+      const target = this.sprite ?? this.graphics;
+      target.setAlpha(0.7 + Math.sin(this.hitFlashTimer * 0.03) * 0.3);
       if (this.hitFlashTimer <= 0) {
-        this.graphics.setAlpha(1);
+        target.setAlpha(1);
       }
     }
 
@@ -63,8 +79,9 @@ export class EnemyEntity {
 
   onHit(): void {
     this.hitFlashTimer = 120;
+    const target = this.sprite ?? this.graphics;
     this.scene.tweens.add({
-      targets: this.graphics,
+      targets: target,
       scaleX: 1.2,
       scaleY: 1.2,
       duration: 40,
@@ -73,6 +90,8 @@ export class EnemyEntity {
   }
 
   private drawEnemy(): void {
+    if (this.sprite) return;
+
     this.graphics.clear();
     const data = ENEMY_DATA[this.enemy.type as EnemyType];
     const r = data.radius;
@@ -145,6 +164,7 @@ export class EnemyEntity {
 
   destroy(): void {
     this.graphics.destroy();
+    this.sprite?.destroy();
     this.hpBarBg.destroy();
     this.hpBar.destroy();
   }

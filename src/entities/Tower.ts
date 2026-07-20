@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
 import { PlacedTower } from '../logic/game-state';
 import { TOWER_LEVELS } from '../data/tower-data';
+import { getTowerAsset } from '../data/asset-registry';
 
 export class TowerEntity {
   graphics: Phaser.GameObjects.Graphics;
+  sprite?: Phaser.GameObjects.Image;
   rangeCircle: Phaser.GameObjects.Arc;
   private tower: PlacedTower;
   private towerX: number;
@@ -23,10 +25,22 @@ export class TowerEntity {
     this.rangeCircle.setStrokeStyle(1, color, 0.3);
     this.rangeCircle.setVisible(false);
 
+    const asset = getTowerAsset(tower.type);
+    const textureKey = asset.textureKey;
+    if (scene.textures.exists(textureKey)) {
+      this.sprite = scene.add.image(x, y, textureKey);
+      this.sprite.setDepth(10);
+      this.sprite.setDisplaySize(asset.displayWidth, asset.displayHeight);
+      this.sprite.setOrigin(0.5);
+      this.graphics.setVisible(false);
+    }
+
     this.drawTower();
   }
 
   private drawTower(): void {
+    if (this.sprite) return;
+
     this.graphics.clear();
     const x = this.towerX;
     const y = this.towerY;
@@ -133,15 +147,16 @@ export class TowerEntity {
   }
 
   playAttackFlash(scene: Phaser.Scene): void {
-    this.graphics.setAlpha(1.3);
+    const target = this.sprite ?? this.graphics;
+    target.setAlpha(1.3);
     scene.tweens.add({
-      targets: this.graphics,
+      targets: target,
       scaleX: 1.15,
       scaleY: 1.15,
       duration: 60,
       yoyo: true,
       onYoyo: () => {
-        this.graphics.setScale(1);
+        target.setScale(1);
       },
     });
   }
@@ -156,6 +171,7 @@ export class TowerEntity {
 
   destroy(): void {
     this.graphics.destroy();
+    this.sprite?.destroy();
     this.rangeCircle.destroy();
   }
 }
