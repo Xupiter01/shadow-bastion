@@ -1,12 +1,19 @@
 import Phaser from 'phaser';
+import { updateHighestCompleted } from '../logic/map-progression';
 
 export class ResultScene extends Phaser.Scene {
   constructor() {
     super('Result');
   }
 
-  create(data: { won: boolean }): void {
+  create(data: { won: boolean; mapId?: number }): void {
     const won = data?.won ?? false;
+    const mapId = data?.mapId ?? 1;
+
+    if (won) {
+      const prev = this.registry.get('highestCompleted') ?? 0;
+      this.registry.set('highestCompleted', updateHighestCompleted(prev, mapId, true));
+    }
 
     this.add.rectangle(180, 320, 360, 640, 0x0a0a1a);
 

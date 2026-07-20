@@ -28,6 +28,11 @@ export function canAccessMap(mapId: number, highestCompleted: number): boolean {
   return highestCompleted >= mapId - 1;
 }
 
+export function updateHighestCompleted(prev: number, mapId: number, won: boolean): number {
+  if (won && mapId > prev) return mapId;
+  return prev;
+}
+
 export function getNextMap(currentMapId: number): number | null {
   const next = currentMapId + 1;
   return next <= getTotalMaps() ? next : null;

@@ -33,6 +33,7 @@ export class GameScene extends Phaser.Scene {
   private debugPanel: Phaser.GameObjects.Container | null = null;
   private slotHighlights: Map<number, Phaser.GameObjects.Arc> = new Map();
   private activeMap!: MapDefinition;
+  private activeMapId: number = 1;
 
   constructor() {
     super('Game');
@@ -40,6 +41,7 @@ export class GameScene extends Phaser.Scene {
 
   create(data: { mapId?: number } = {}): void {
     const mapId = data.mapId ?? 1;
+    this.activeMapId = mapId;
     this.activeMap = getMap(mapId) ?? getMap(1)!;
 
     this.state = createGameState();
@@ -431,7 +433,7 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, delta: number): void {
     if (this.state.gameOver) {
-      this.scene.start('Result', { won: this.state.won });
+      this.scene.start('Result', { won: this.state.won, mapId: this.activeMapId });
       return;
     }
 
