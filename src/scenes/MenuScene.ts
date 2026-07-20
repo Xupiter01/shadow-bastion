@@ -24,7 +24,7 @@ export class MenuScene extends Phaser.Scene {
     startBtn.on('pointerover', () => startBtn.setFillStyle(0x4a6fa5));
     startBtn.on('pointerout', () => startBtn.setFillStyle(0x34495e));
     startBtn.on('pointerdown', () => {
-      this.scene.start('Game', { mapId: 1 });
+      this.scene.start('MapSelect');
     });
   }
 }

@@ -36,7 +36,7 @@ export class ResultScene extends Phaser.Scene {
     restartBtn.on('pointerover', () => restartBtn.setFillStyle(0x4a6fa5));
     restartBtn.on('pointerout', () => restartBtn.setFillStyle(0x34495e));
     restartBtn.on('pointerdown', () => {
-      this.scene.start('Game');
+      this.scene.start('MapSelect');
     });
   }
 }

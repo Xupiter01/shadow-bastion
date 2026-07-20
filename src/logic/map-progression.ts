@@ -1,4 +1,18 @@
-import { getTotalMaps } from '../data/maps/map-registry';
+import { getAllMaps, getTotalMaps } from '../data/maps/map-registry';
+
+export interface SelectableMap {
+  mapId: number;
+  theme: string;
+  accessible: boolean;
+}
+
+export function getSelectableMaps(highestCompleted: number): SelectableMap[] {
+  return getAllMaps().map(m => ({
+    mapId: m.id,
+    theme: m.theme,
+    accessible: canAccessMap(m.id, highestCompleted),
+  }));
+}
 
 export function isBossMap(mapId: number): boolean {
   return mapId > 0 && mapId % 10 === 0;
