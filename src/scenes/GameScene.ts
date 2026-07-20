@@ -8,7 +8,8 @@ import { findTarget, distance } from '../logic/targeting';
 import { applyDamage, applySlow, grantEnemyReward } from '../logic/damage';
 import { TOWER_LEVELS, SLOW_FACTOR, SLOW_DURATION, CANNON_SPLASH_RADIUS, TowerType } from '../data/tower-data';
 import { ENEMY_DATA, EnemyType } from '../data/enemy-data';
-import { PLACEMENT_SLOTS, PATH_POINTS, GATE_POSITION, PlacementSlot } from '../data/map-data';
+import { getMap } from '../data/maps/map-registry';
+import type { MapDefinition } from '../data/maps/types';
 import { TowerEntity } from '../entities/Tower';
 import { EnemyEntity } from '../entities/Enemy';
 import { shouldDismissPanels } from '../logic/input-policy';
@@ -31,12 +32,16 @@ export class GameScene extends Phaser.Scene {
   private startWaveBtn!: { btn: Phaser.GameObjects.Rectangle; txt: Phaser.GameObjects.Text };
   private debugPanel: Phaser.GameObjects.Container | null = null;
   private slotHighlights: Map<number, Phaser.GameObjects.Arc> = new Map();
+  private activeMap!: MapDefinition;
 
   constructor() {
     super('Game');
   }
 
-  create(): void {
+  create(data: { mapId?: number } = {}): void {
+    const mapId = data.mapId ?? 1;
+    this.activeMap = getMap(mapId) ?? getMap(1)!;
+
     this.state = createGameState();
     this.spawner = createWaveSpawner();
     this.towerEntities.clear();
@@ -58,6 +63,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawMap(): void {
+    const road = this.activeMap.road;
+    const castle = this.activeMap.castle;
+
     this.add.rectangle(180, 320, 360, 520, 0x000000, 0)
       .setInteractive()
       .on('pointerdown', (pointer: Phaser.Input.Pointer) => {
@@ -68,23 +76,23 @@ export class GameScene extends Phaser.Scene {
     const gfx = this.add.graphics();
     gfx.lineStyle(8, 0x1a1a3e, 1);
     gfx.beginPath();
-    gfx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
-    for (let i = 1; i < PATH_POINTS.length; i++) {
-      gfx.lineTo(PATH_POINTS[i].x, PATH_POINTS[i].y);
+    gfx.moveTo(road[0].x, road[0].y);
+    for (let i = 1; i < road.length; i++) {
+      gfx.lineTo(road[i].x, road[i].y);
     }
     gfx.strokePath();
 
     gfx.lineStyle(3, 0x2c3e50, 0.6);
     gfx.beginPath();
-    gfx.moveTo(PATH_POINTS[0].x, PATH_POINTS[0].y);
-    for (let i = 1; i < PATH_POINTS.length; i++) {
-      gfx.lineTo(PATH_POINTS[i].x, PATH_POINTS[i].y);
+    gfx.moveTo(road[0].x, road[0].y);
+    for (let i = 1; i < road.length; i++) {
+      gfx.lineTo(road[i].x, road[i].y);
     }
     gfx.strokePath();
 
-    this.add.rectangle(GATE_POSITION.x, GATE_POSITION.y, 60, 16, 0xc0392b)
+    this.add.rectangle(castle.x, castle.y, 60, 16, 0xc0392b)
       .setStrokeStyle(2, 0xe74c3c);
-    this.add.text(GATE_POSITION.x, GATE_POSITION.y, 'GATE', {
+    this.add.text(castle.x, castle.y, 'GATE', {
       fontSize: '9px', color: '#fff', fontFamily: 'monospace',
     }).setOrigin(0.5);
 
@@ -94,7 +102,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private drawPlacementSlots(): void {
-    for (const slot of PLACEMENT_SLOTS) {
+    for (const slot of this.activeMap.slots) {
       const circle = this.add.circle(slot.x, slot.y, 14, 0x2ecc71, 0.15);
       circle.setStrokeStyle(2, 0x2ecc71, 0.6);
       circle.setInteractive();
@@ -259,7 +267,7 @@ export class GameScene extends Phaser.Scene {
 
   private showSelectionPanel(slotId: number): void {
     this.closePanels();
-    const slot = PLACEMENT_SLOTS.find(s => s.id === slotId)!;
+    const slot = this.activeMap.slots.find(s => s.id === slotId)!;
     const types: Array<{ type: TowerType; label: string; cost: number; color: number }> = [
       { type: 'archer', label: 'Archer', cost: TOWER_LEVELS.archer[0].stats.cost, color: TOWER_LEVELS.archer[0].stats.color },
       { type: 'cannon', label: 'Cannon', cost: TOWER_LEVELS.cannon[0].stats.cost, color: TOWER_LEVELS.cannon[0].stats.color },
@@ -307,7 +315,7 @@ export class GameScene extends Phaser.Scene {
     const upgradeCost = canUpgrade ? currentLevelData.upgradeCost : 0;
     const sellValue = Math.floor(tower.totalCost * 0.7);
 
-    const slot = PLACEMENT_SLOTS.find(s => s.id === tower.slotId)!;
+    const slot = this.activeMap.slots.find(s => s.id === tower.slotId)!;
     const panel = this.add.container(slot.x, slot.y - 65);
 
     const bg = this.add.rectangle(0, 5, 110, canUpgrade ? 70 : 45, 0x1a1a2e, 0.95)
@@ -376,7 +384,7 @@ export class GameScene extends Phaser.Scene {
   private tryPlaceTower(slotId: number, type: TowerType): void {
     const result = placeTower(this.state, slotId, type);
     if (result.success) {
-      const slot = PLACEMENT_SLOTS.find(s => s.id === slotId)!;
+      const slot = this.activeMap.slots.find(s => s.id === slotId)!;
       const tower = this.state.towers.find(t => t.slotId === slotId)!;
       const entity = new TowerEntity(this, slot.x, slot.y, tower);
       this.towerEntities.set(tower.id, entity);
@@ -414,9 +422,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   private getSegmentLength(pathIndex: number): number {
-    const idx = Math.min(pathIndex, PATH_POINTS.length - 2);
-    const a = PATH_POINTS[idx];
-    const b = PATH_POINTS[idx + 1];
+    const road = this.activeMap.road;
+    const idx = Math.min(pathIndex, road.length - 2);
+    const a = road[idx];
+    const b = road[idx + 1];
     return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
   }
 
@@ -425,6 +434,8 @@ export class GameScene extends Phaser.Scene {
       this.scene.start('Result', { won: this.state.won });
       return;
     }
+
+    const road = this.activeMap.road;
 
     // Spawn enemies
     if (this.spawnQueue.length > 0) {
@@ -447,12 +458,12 @@ export class GameScene extends Phaser.Scene {
       const segLength = this.getSegmentLength(enemy.pathIndex);
       enemy.pathProgress += moveAmount / segLength;
 
-      while (enemy.pathProgress >= 1 && enemy.pathIndex < PATH_POINTS.length - 2) {
+      while (enemy.pathProgress >= 1 && enemy.pathIndex < road.length - 2) {
         enemy.pathProgress -= 1;
         enemy.pathIndex++;
       }
 
-      if (enemy.pathIndex >= PATH_POINTS.length - 1) {
+      if (enemy.pathIndex >= road.length - 1) {
         enemy.alive = false;
         this.state.lives -= enemy.livesCost;
         if (this.state.lives <= 0) {
