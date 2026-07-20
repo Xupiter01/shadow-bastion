@@ -6,19 +6,35 @@ import {
 import { createWaveSpawner, WaveSpawner, applyWaveHpScale } from '../logic/wave-system';
 import { findTarget, distance } from '../logic/targeting';
 import { applyDamage, applySlow, grantEnemyReward } from '../logic/damage';
+import { TowerCooldownTracker, createProjectileState, type ProjectileState } from '../logic/combat-timing';
 import { TOWER_LEVELS, SLOW_FACTOR, SLOW_DURATION, CANNON_SPLASH_RADIUS, TowerType } from '../data/tower-data';
 import { ENEMY_DATA, EnemyType } from '../data/enemy-data';
 import { getMap } from '../data/maps/map-registry';
 import type { MapDefinition } from '../data/maps/types';
 import { TowerEntity } from '../entities/Tower';
 import { EnemyEntity } from '../entities/Enemy';
+import { ProjectileEntity } from '../entities/Projectile';
+import {
+  createMuzzleFlash, createCannonExplosion, createFrostImpact,
+  createFloatingText, createSlowEffect,
+} from '../rendering/PixelEffects';
 import { shouldDismissPanels } from '../logic/input-policy';
+
+interface ManagedProjectile {
+  entity: ProjectileEntity;
+  towerType: TowerType;
+  targetId: number;
+  applied: boolean;
+}
 
 export class GameScene extends Phaser.Scene {
   private state!: GameState;
   private spawner!: WaveSpawner;
   private towerEntities: Map<number, TowerEntity> = new Map();
   private enemyEntities: Map<number, EnemyEntity> = new Map();
+  private projectiles: ManagedProjectile[] = [];
+  private cooldownTracker: TowerCooldownTracker = new TowerCooldownTracker();
+  private gameTickMs: number = 0;
   private selectedSlotId: number | null = null;
   private selectedTowerId: number | null = null;
   private hudText!: Phaser.GameObjects.Text;
@@ -48,7 +64,9 @@ export class GameScene extends Phaser.Scene {
     this.spawner = createWaveSpawner();
     this.towerEntities.clear();
     this.enemyEntities.clear();
-    this.enemyEntities.clear();
+    this.projectiles = [];
+    this.cooldownTracker = new TowerCooldownTracker();
+    this.gameTickMs = 0;
     this.selectedSlotId = null;
     this.selectedTowerId = null;
     this.spawnQueue = [];
@@ -61,7 +79,6 @@ export class GameScene extends Phaser.Scene {
     this.drawBottomBar();
     this.drawStartWaveButton();
     this.drawWaveStatus();
-
   }
 
   private drawMap(): void {
@@ -437,9 +454,9 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    this.gameTickMs += delta;
     const road = this.activeMap.road;
 
-    // Spawn enemies
     if (this.spawnQueue.length > 0) {
       this.spawnTimer -= delta;
       if (this.spawnTimer <= 0) {
@@ -449,7 +466,6 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // Move enemies
     for (const enemy of this.state.enemies) {
       if (!enemy.alive) continue;
 
@@ -476,23 +492,9 @@ export class GameScene extends Phaser.Scene {
       }
 
       const entity = this.enemyEntities.get(enemy.id);
-      if (entity) entity.update();
+      if (entity) entity.update(delta);
     }
 
-    // Clean up dead enemies and grant rewards
-    for (const [id, entity] of this.enemyEntities) {
-      const enemy = this.state.enemies.find(e => e.id === id);
-      if (!enemy || !enemy.alive) {
-        if (enemy && enemy.hp <= 0) {
-          grantEnemyReward(this.state, enemy);
-        }
-        entity.destroy();
-        this.enemyEntities.delete(id);
-      }
-    }
-    this.state.enemies = this.state.enemies.filter(e => e.alive);
-
-    // Tower shooting
     for (const tower of this.state.towers) {
       const entity = this.towerEntities.get(tower.id);
       if (!entity) continue;
@@ -500,49 +502,116 @@ export class GameScene extends Phaser.Scene {
       const stats = levels[tower.level - 1].stats;
       const pos = entity.getPosition();
 
-      const target = findTarget(this.state.enemies, pos, stats.range);
-      if (target) {
-        const targetEntity = this.enemyEntities.get(target.id);
-        const targetPos = targetEntity?.getWorldPos() ?? pos;
+      if (!this.cooldownTracker.canFire(tower.id, this.gameTickMs)) continue;
 
-        applyDamage(target, stats.damage);
-        if (tower.type === 'frost') {
-          applySlow(target, SLOW_DURATION);
-        }
-        if (tower.type === 'cannon') {
-          for (const e of this.state.enemies) {
-            if (e === target || !e.alive) continue;
-            const eEntity = this.enemyEntities.get(e.id);
-            if (eEntity) {
-              const epos = eEntity.getWorldPos();
-              if (distance(epos, targetPos) < CANNON_SPLASH_RADIUS) {
-                applyDamage(e, stats.damage * 0.5);
+      const target = findTarget(this.state.enemies, pos, stats.range);
+      if (!target) continue;
+
+      const targetEntity = this.enemyEntities.get(target.id);
+      const targetPos = targetEntity?.getWorldPos() ?? pos;
+
+      const projState = createProjectileState(
+        pos.x, pos.y, targetPos.x, targetPos.y,
+        stats.damage, tower.type, target.id,
+      );
+      const projEntity = new ProjectileEntity(this, projState);
+      this.projectiles.push({
+        entity: projEntity,
+        towerType: tower.type,
+        targetId: target.id,
+        applied: false,
+      });
+
+      this.cooldownTracker.recordFire(tower.id, this.gameTickMs, stats.fireRate);
+      entity.playAttackFlash(this);
+      createMuzzleFlash(this, pos.x, pos.y, stats.color);
+    }
+
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const proj = this.projectiles[i];
+      const stillAlive = proj.entity.update(delta);
+
+      if (!stillAlive && proj.entity.hasImpacted() && !proj.applied) {
+        proj.applied = true;
+        const state = proj.entity.getState();
+        const target = this.state.enemies.find(e => e.id === state.targetId);
+        const targetEntity = state.targetId >= 0 ? this.enemyEntities.get(state.targetId) : undefined;
+
+        if (target && target.alive) {
+          applyDamage(target, state.damage);
+
+          const impactPos = targetEntity?.getWorldPos() ?? { x: state.x, y: state.y };
+          if (targetEntity) targetEntity.onHit();
+
+          if (target.hp <= 0 && target.reward > 0) {
+            const reward = grantEnemyReward(this.state, target);
+            if (reward > 0) {
+              createFloatingText(this, impactPos.x, impactPos.y - 10, `+${reward}`, '#f1c40f', 10);
+            }
+          } else {
+            createFloatingText(this, impactPos.x, impactPos.y - 8, `-${Math.round(state.damage)}`, '#ff4444', 9);
+          }
+
+          if (proj.towerType === 'cannon') {
+            createCannonExplosion(this, impactPos.x, impactPos.y);
+            for (const e of this.state.enemies) {
+              if (e === target || !e.alive) continue;
+              const eEntity = this.enemyEntities.get(e.id);
+              if (eEntity) {
+                const epos = eEntity.getWorldPos();
+                if (distance(epos, impactPos) < CANNON_SPLASH_RADIUS) {
+                  applyDamage(e, state.damage * 0.5);
+                  eEntity.onHit();
+                  if (e.hp <= 0 && e.reward > 0) {
+                    const splashReward = grantEnemyReward(this.state, e);
+                    if (splashReward > 0) {
+                      createFloatingText(this, epos.x, epos.y - 10, `+${splashReward}`, '#f1c40f', 9);
+                    }
+                  }
+                }
               }
             }
+          } else if (proj.towerType === 'frost') {
+            createFrostImpact(this, impactPos.x, impactPos.y);
+            applySlow(target, SLOW_DURATION);
+            createSlowEffect(this, impactPos.x, impactPos.y);
+          } else {
+            createFloatingText(this, impactPos.x + 6, impactPos.y - 14, '', '#ffffff', 0);
           }
         }
+
+        proj.entity.destroy();
+        this.projectiles.splice(i, 1);
+      } else if (!stillAlive) {
+        proj.entity.destroy();
+        this.projectiles.splice(i, 1);
       }
     }
 
-    // Update HUD
+    for (const [id, entity] of this.enemyEntities) {
+      const enemy = this.state.enemies.find(e => e.id === id);
+      if (!enemy || !enemy.alive) {
+        entity.destroy();
+        this.enemyEntities.delete(id);
+      }
+    }
+    this.state.enemies = this.state.enemies.filter(e => e.alive);
+
     this.updateHUD();
 
-    // Debug info
     if (this.debugMode) {
       const alive = this.state.enemies.filter(e => e.alive).length;
       this.debugText.setText(
-        `FPS: ${Math.round(this.game.loop.actualFps)} | Enemies: ${alive} | Phase: ${this.state.phase} | Tower: ${this.state.towers.length}`
+        `FPS: ${Math.round(this.game.loop.actualFps)} | Enemies: ${alive} | Projectiles: ${this.projectiles.length} | Phase: ${this.state.phase}`
       );
     }
 
-    // Wave status
     if (this.state.phase === 'wave') {
       const alive = this.state.enemies.filter(e => e.alive).length;
       this.waveStatusText.setText(`Wave ${this.state.wave} | Enemies: ${alive}`);
     }
 
-    // Check wave complete
-    if (this.state.phase === 'wave' && this.spawnQueue.length === 0 && this.state.enemies.length === 0) {
+    if (this.state.phase === 'wave' && this.spawnQueue.length === 0 && this.state.enemies.length === 0 && this.projectiles.length === 0) {
       this.spawner.tryAdvanceWave(this.state);
       if (!this.state.gameOver) {
         this.startWaveBtn.btn.setVisible(true);
