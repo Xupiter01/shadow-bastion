@@ -1,0 +1,83 @@
+import { describe, it, expect } from 'vitest';
+import { getMap, getAllMaps } from '../src/data/maps/map-registry';
+import type { MapDefinition } from '../data/maps/types';
+
+const CANVAS_W = 360;
+const CANVAS_H = 640;
+
+describe('MapVisualData', () => {
+  const maps = getAllMaps();
+
+  for (const map of maps) {
+    describe(`Map ${map.id} (${map.theme})`, () => {
+      it('has a palette with all required keys', () => {
+        expect(map.palette).toBeDefined();
+        for (const key of ['ground', 'road', 'roadEdge', 'water', 'accent', 'castle', 'gate']) {
+          expect(typeof (map.palette as Record<string, number>)[key]).toBe('number');
+        }
+      });
+
+      it('has at least 2 zones', () => {
+        expect(map.zones.length).toBeGreaterThanOrEqual(2);
+      });
+
+      it('zones cover the full vertical range without gaps', () => {
+        const sorted = [...map.zones].sort((a, b) => a.yStart - b.yStart);
+        expect(sorted[0].yStart).toBeLessThanOrEqual(0);
+        expect(sorted[sorted.length - 1].yEnd).toBeGreaterThanOrEqual(CANVAS_H);
+        for (let i = 1; i < sorted.length; i++) {
+          expect(sorted[i].yStart).toBe(sorted[i - 1].yEnd);
+        }
+      });
+
+      it('zone types are valid', () => {
+        const valid = ['forest', 'water', 'ruins', 'volcanic', 'frozen', 'grass'];
+        for (const z of map.zones) {
+          expect(valid).toContain(z.type);
+        }
+      });
+
+      it('has at least 4 landmarks', () => {
+        expect(map.landmarks.length).toBeGreaterThanOrEqual(4);
+      });
+
+      it('landmarks include a portal and a castle-keep', () => {
+        const types = map.landmarks.map(l => l.type);
+        expect(types).toContain('portal');
+        expect(types).toContain('castle-keep');
+      });
+
+      it('all landmarks are within canvas bounds', () => {
+        for (const l of map.landmarks) {
+          expect(l.x).toBeGreaterThanOrEqual(-20);
+          expect(l.x).toBeLessThanOrEqual(CANVAS_W + 20);
+          expect(l.y).toBeGreaterThanOrEqual(-40);
+          expect(l.y).toBeLessThanOrEqual(CANVAS_H + 40);
+        }
+      });
+
+      it('landmark scales are positive', () => {
+        for (const l of map.landmarks) {
+          expect(l.scale).toBeGreaterThan(0);
+        }
+      });
+    });
+  }
+
+  describe('cross-map visual diversity', () => {
+    it('maps have different palette ground colors', () => {
+      const grounds = maps.map(m => m.palette.ground);
+      expect(new Set(grounds).size).toBe(maps.length);
+    });
+
+    it('maps have different zone compositions', () => {
+      const signatures = maps.map(m => m.zones.map(z => z.type).join('-'));
+      expect(new Set(signatures).size).toBe(maps.length);
+    });
+
+    it('maps have different landmark counts or types', () => {
+      const sigs = maps.map(m => m.landmarks.map(l => l.type).sort().join(','));
+      expect(new Set(sigs).size).toBe(maps.length);
+    });
+  });
+});
