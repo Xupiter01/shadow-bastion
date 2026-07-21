@@ -21,6 +21,11 @@ import {
 import { shouldDismissPanels } from '../logic/input-policy';
 import { formatHearts, formatLives, getCastleHitFeedback } from '../logic/heart-display';
 import { getMapBackgroundKey } from '../data/map-asset-registry';
+import {
+  createGameControls, scaleDelta, togglePause, setSpeed,
+  createWaveSummary,
+  type GameControls,
+} from '../logic/game-controls';
 
 interface ManagedProjectile {
   entity: ProjectileEntity;
@@ -52,6 +57,10 @@ export class GameScene extends Phaser.Scene {
   private slotHighlights: Map<number, Phaser.GameObjects.Arc> = new Map();
   private activeMap!: MapDefinition;
   private activeMapId: number = 1;
+  private controls: GameControls = createGameControls();
+  private waveSummaryContainer: Phaser.GameObjects.Container | null = null;
+  private essenceAtWaveStart: number = 0;
+  private livesAtWaveStart: number = 0;
 
   constructor() {
     super('Game');
@@ -73,6 +82,7 @@ export class GameScene extends Phaser.Scene {
     this.selectedTowerId = null;
     this.spawnQueue = [];
     this.spawnTimer = 0;
+    this.waveSummaryContainer = null;
 
     this.drawMapBackground();
     this.drawMap();
@@ -82,6 +92,8 @@ export class GameScene extends Phaser.Scene {
     this.drawBottomBar();
     this.drawStartWaveButton();
     this.drawWaveStatus();
+    this.drawPauseButton();
+    this.drawSpeedButton();
   }
 
   private drawMapBackground(): void {
@@ -257,6 +269,45 @@ export class GameScene extends Phaser.Scene {
     this.debugText.setVisible(false);
   }
 
+  private pauseBtn!: { btn: Phaser.GameObjects.Rectangle; txt: Phaser.GameObjects.Text };
+
+  private drawPauseButton(): void {
+    const btn = this.add.rectangle(300, 50, 50, 18, 0x444444)
+      .setStrokeStyle(1, 0x666666)
+      .setInteractive();
+    const txt = this.add.text(300, 50, 'PAUSE', {
+      fontSize: '8px', color: '#ccc', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+
+    btn.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      p.event.stopPropagation();
+      togglePause(this.controls);
+      txt.setText(this.controls.paused ? 'RESUME' : 'PAUSE');
+    });
+
+    this.pauseBtn = { btn, txt };
+  }
+
+  private speedBtn!: { btn: Phaser.GameObjects.Rectangle; txt: Phaser.GameObjects.Text };
+
+  private drawSpeedButton(): void {
+    const btn = this.add.rectangle(240, 50, 40, 18, 0x444444)
+      .setStrokeStyle(1, 0x666666)
+      .setInteractive();
+    const txt = this.add.text(240, 50, '1x', {
+      fontSize: '8px', color: '#ccc', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+
+    btn.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      p.event.stopPropagation();
+      const next = this.controls.speed === 1 ? 2 : 1;
+      setSpeed(this.controls, next);
+      txt.setText(`${next}x`);
+    });
+
+    this.speedBtn = { btn, txt };
+  }
+
   private showDebugPanel(): void {
     this.debugPanel?.destroy();
 
@@ -424,6 +475,62 @@ export class GameScene extends Phaser.Scene {
     this.slotHighlights.forEach(h => h.setVisible(false));
   }
 
+  private showWaveSummary(): void {
+    this.waveSummaryContainer?.destroy();
+    const summary = createWaveSummary({
+      waveNumber: this.state.wave - 1,
+      essenceGained: this.state.essence - this.essenceAtWaveStart,
+      heartsRemaining: this.state.lives,
+      totalWaves: 5,
+    });
+
+    const overlay = this.add.rectangle(180, 320, 360, 640, 0x000000, 0.6);
+    overlay.setInteractive();
+
+    const panel = this.add.container(180, 280);
+    const bg = this.add.rectangle(0, 0, 240, 160, 0x1a1a2e, 0.95)
+      .setStrokeStyle(2, 0xf1c40f);
+    panel.add(bg);
+
+    const title = this.add.text(0, -55, `Wave ${summary.waveNumber} Cleared!`, {
+      fontSize: '16px', color: '#f1c40f', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    panel.add(title);
+
+    const essenceTxt = this.add.text(0, -25, `+${summary.essenceGained} Essence`, {
+      fontSize: '12px', color: '#2ecc71', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    panel.add(essenceTxt);
+
+    const heartsTxt = this.add.text(0, 0, `${'♥'.repeat(summary.heartsRemaining)} ${summary.heartsRemaining}/${MAX_HEARTS}`, {
+      fontSize: '12px', color: '#e74c3c', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    panel.add(heartsTxt);
+
+    const promptText = summary.hasNextWave ? 'Tap to continue' : 'Victory!';
+    const prompt = this.add.text(0, 40, promptText, {
+      fontSize: '11px', color: '#bdc3c7', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    panel.add(prompt);
+
+    const dismiss = () => {
+      overlay.destroy();
+      panel.destroy();
+      this.waveSummaryContainer = null;
+      if (summary.hasNextWave) {
+        this.startWaveBtn.btn.setVisible(true);
+        this.startWaveBtn.txt.setVisible(true);
+        this.waveStatusText.setText(`Prepare for Wave ${this.state.wave}`);
+      }
+    };
+    overlay.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      p.event.stopPropagation();
+      dismiss();
+    });
+
+    this.waveSummaryContainer = this.add.container(0, 0, [overlay, panel]);
+  }
+
   private tryPlaceTower(slotId: number, type: TowerType): void {
     const result = placeTower(this.state, slotId, type);
     if (result.success) {
@@ -437,6 +544,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private startWave(): void {
+    this.essenceAtWaveStart = this.state.essence;
+    this.livesAtWaveStart = this.state.lives;
     const entries = this.spawner.getWaveEnemies(this.state.wave);
     this.spawnQueue = [...entries];
     this.spawnTimer = 500;
@@ -478,11 +587,12 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.gameTickMs += delta;
+    const effectiveDelta = scaleDelta(delta, this.controls);
+    this.gameTickMs += effectiveDelta;
     const road = this.activeMap.road;
 
     if (this.spawnQueue.length > 0) {
-      this.spawnTimer -= delta;
+      this.spawnTimer -= effectiveDelta;
       if (this.spawnTimer <= 0) {
         const next = this.spawnQueue.shift()!;
         this.spawnEnemy(next.type);
@@ -494,9 +604,9 @@ export class GameScene extends Phaser.Scene {
       if (!enemy.alive) continue;
 
       const speedMult = enemy.slowTimer > 0 ? SLOW_FACTOR : 1;
-      if (enemy.slowTimer > 0) enemy.slowTimer -= delta;
+      if (enemy.slowTimer > 0) enemy.slowTimer -= effectiveDelta;
 
-      const moveAmount = (enemy.speed * speedMult * delta) / 1000;
+      const moveAmount = (enemy.speed * speedMult * effectiveDelta) / 1000;
       const segLength = this.getSegmentLength(enemy.pathIndex);
       enemy.pathProgress += moveAmount / segLength;
 
@@ -515,7 +625,7 @@ export class GameScene extends Phaser.Scene {
       }
 
       const entity = this.enemyEntities.get(enemy.id);
-      if (entity) entity.update(delta);
+      if (entity) entity.update(effectiveDelta);
     }
 
     for (const tower of this.state.towers) {
@@ -552,7 +662,7 @@ export class GameScene extends Phaser.Scene {
 
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const proj = this.projectiles[i];
-      const stillAlive = proj.entity.update(delta);
+      const stillAlive = proj.entity.update(effectiveDelta);
 
       if (!stillAlive && proj.entity.hasImpacted() && !proj.applied) {
         proj.applied = true;
@@ -637,9 +747,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state.phase === 'wave' && this.spawnQueue.length === 0 && this.state.enemies.length === 0 && this.projectiles.length === 0) {
       this.spawner.tryAdvanceWave(this.state);
       if (!this.state.gameOver) {
-        this.startWaveBtn.btn.setVisible(true);
-        this.startWaveBtn.txt.setVisible(true);
-        this.waveStatusText.setText(`Wave ${this.state.wave - 1} cleared! Prepare for Wave ${this.state.wave}`);
+        this.showWaveSummary();
       }
     }
   }
