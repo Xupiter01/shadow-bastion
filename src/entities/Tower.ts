@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { PlacedTower } from '../logic/game-state';
 import { TOWER_LEVELS } from '../data/tower-data';
 import { getTowerAsset } from '../data/asset-registry';
+import { computeAttackFlashScales } from './attack-flash';
 
 export class TowerEntity {
   graphics: Phaser.GameObjects.Graphics;
@@ -148,15 +149,19 @@ export class TowerEntity {
 
   playAttackFlash(scene: Phaser.Scene): void {
     const target = this.sprite ?? this.graphics;
+    const baseScaleX = target.scaleX;
+    const baseScaleY = target.scaleY;
+    const { flashScaleX, flashScaleY, restoreScaleX, restoreScaleY } =
+      computeAttackFlashScales(baseScaleX, baseScaleY);
     target.setAlpha(1.3);
     scene.tweens.add({
       targets: target,
-      scaleX: 1.15,
-      scaleY: 1.15,
+      scaleX: flashScaleX,
+      scaleY: flashScaleY,
       duration: 60,
       yoyo: true,
       onYoyo: () => {
-        target.setScale(1);
+        target.setScale(restoreScaleX, restoreScaleY);
       },
     });
   }
