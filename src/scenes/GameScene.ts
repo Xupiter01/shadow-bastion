@@ -20,6 +20,7 @@ import {
 } from '../rendering/PixelEffects';
 import { shouldDismissPanels } from '../logic/input-policy';
 import { formatHearts, formatLives, getCastleHitFeedback } from '../logic/heart-display';
+import { getMapBackgroundKey } from '../data/map-asset-registry';
 
 interface ManagedProjectile {
   entity: ProjectileEntity;
@@ -73,6 +74,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnQueue = [];
     this.spawnTimer = 0;
 
+    this.drawMapBackground();
     this.drawMap();
     this.drawPlacementSlots();
     this.drawHUD();
@@ -80,6 +82,25 @@ export class GameScene extends Phaser.Scene {
     this.drawBottomBar();
     this.drawStartWaveButton();
     this.drawWaveStatus();
+  }
+
+  private drawMapBackground(): void {
+    const bgKey = getMapBackgroundKey(this.activeMapId);
+    if (!bgKey || !this.textures.exists(bgKey)) return;
+
+    const canvasW = 360;
+    const canvasH = 640;
+    const img = this.add.image(canvasW / 2, canvasH / 2, bgKey);
+
+    const tex = this.textures.get(bgKey);
+    const source = tex.getSourceImage();
+    const srcW = source.width;
+    const srcH = source.height;
+    const scale = Math.min(canvasW / srcW, canvasH / srcH);
+    img.setDisplaySize(srcW * scale, srcH * scale);
+    img.setDepth(-10);
+
+    this.add.rectangle(canvasW / 2, canvasH / 2, canvasW, canvasH, 0x000000, 0.35).setDepth(-9);
   }
 
   private drawMap(): void {
