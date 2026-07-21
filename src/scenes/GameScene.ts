@@ -19,6 +19,11 @@ import {
   createFloatingText, createSlowEffect, createCastleHitEffect,
 } from '../rendering/PixelEffects';
 import { shouldDismissPanels } from '../logic/input-policy';
+import {
+  createPlacementMode, selectSlot, selectTowerType, cancelPlacement,
+  getPlacementFeedback, isSlotOccupied,
+  type PlacementMode,
+} from '../logic/placement-policy';
 import { formatHearts, formatLives, getCastleHitFeedback } from '../logic/heart-display';
 import { getMapBackgroundKey } from '../data/map-asset-registry';
 import {
@@ -42,8 +47,9 @@ export class GameScene extends Phaser.Scene {
   private projectiles: ManagedProjectile[] = [];
   private cooldownTracker: TowerCooldownTracker = new TowerCooldownTracker();
   private gameTickMs: number = 0;
-  private selectedSlotId: number | null = null;
-  private selectedTowerId: number | null = null;
+  private placementMode: PlacementMode = createPlacementMode();
+  private ghostRangeCircle: Phaser.GameObjects.Arc | null = null;
+  private ghostRangePreview: Phaser.GameObjects.Arc | null = null;
   private hudText!: Phaser.GameObjects.Text;
   private waveStatusText!: Phaser.GameObjects.Text;
   private debugMode: boolean = false;
@@ -78,8 +84,9 @@ export class GameScene extends Phaser.Scene {
     this.projectiles = [];
     this.cooldownTracker = new TowerCooldownTracker();
     this.gameTickMs = 0;
-    this.selectedSlotId = null;
-    this.selectedTowerId = null;
+    this.placementMode = createPlacementMode();
+    this.ghostRangeCircle = null;
+    this.ghostRangePreview = null;
     this.spawnQueue = [];
     this.spawnTimer = 0;
     this.waveSummaryContainer = null;
@@ -158,7 +165,7 @@ export class GameScene extends Phaser.Scene {
     for (const slot of this.activeMap.slots) {
       const circle = this.add.circle(slot.x, slot.y, 14, 0x2ecc71, 0.15);
       circle.setStrokeStyle(2, 0x2ecc71, 0.6);
-      circle.setInteractive();
+      circle.setInteractive(new Phaser.Geom.Circle(0, 0, 28), Phaser.Geom.Circle.Contains);
       circle.setData('slotId', slot.id);
       circle.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
         pointer.event.stopPropagation();
@@ -355,51 +362,144 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.selectedSlotId = slotId;
+    if (this.placementMode.kind === 'confirming_placement') {
+      this.tryPlaceTower(this.placementMode.slotId, this.placementMode.towerType);
+      return;
+    }
+
+    this.placementMode = selectSlot(this.placementMode, slotId);
     this.showSelectionPanel(slotId);
   }
 
   private showSelectionPanel(slotId: number): void {
     this.closePanels();
     const slot = this.activeMap.slots.find(s => s.id === slotId)!;
-    const types: Array<{ type: TowerType; label: string; cost: number; color: number }> = [
-      { type: 'archer', label: 'Archer', cost: TOWER_LEVELS.archer[0].stats.cost, color: TOWER_LEVELS.archer[0].stats.color },
-      { type: 'cannon', label: 'Cannon', cost: TOWER_LEVELS.cannon[0].stats.cost, color: TOWER_LEVELS.cannon[0].stats.color },
-      { type: 'frost', label: 'Frost', cost: TOWER_LEVELS.frost[0].stats.cost, color: TOWER_LEVELS.frost[0].stats.color },
-    ];
+    const options = getPlacementFeedback(this.placementMode, this.state.essence, this.state.towers).options;
 
+    const panelHeight = 90 + (options.some(o => !o.canAfford) ? 16 : 0);
     const panel = this.add.container(slot.x, slot.y - 55);
 
-    const bg = this.add.rectangle(0, 0, 110, 90, 0x1a1a2e, 0.95)
+    const bg = this.add.rectangle(0, 0, 110, panelHeight, 0x1a1a2e, 0.95)
       .setStrokeStyle(1, 0x34495e);
     panel.add(bg);
 
-    types.forEach((t, i) => {
-      const canAfford = this.state.essence >= t.cost;
+    options.forEach((t, i) => {
       const y = -25 + i * 25;
-      const btn = this.add.rectangle(0, y, 95, 20, canAfford ? 0x2c3e50 : 0x333333, 0.9)
-        .setStrokeStyle(1, canAfford ? t.color : 0x555555)
+      const btn = this.add.rectangle(0, y, 95, 20, t.canAfford ? 0x2c3e50 : 0x333333, 0.9)
+        .setStrokeStyle(1, t.canAfford ? t.color : 0x555555)
         .setInteractive();
       const label = this.add.text(0, y, `${t.label} (${t.cost})`, {
-        fontSize: '9px', color: canAfford ? '#fff' : '#666', fontFamily: 'monospace',
+        fontSize: '9px', color: t.canAfford ? '#fff' : '#666', fontFamily: 'monospace',
       }).setOrigin(0.5);
 
-      if (canAfford) {
+      if (t.canAfford) {
         btn.on('pointerdown', (p: Phaser.Input.Pointer) => {
           p.event.stopPropagation();
-          this.tryPlaceTower(slotId, t.type);
+          this.placementMode = selectTowerType(this.placementMode, t.type);
+          this.showConfirmPanel(slotId, t.type);
         });
       }
 
       panel.add([btn, label]);
     });
 
+    if (options.some(o => !o.canAfford)) {
+      const msg = this.add.text(0, 55, 'Not enough Essence', {
+        fontSize: '8px', color: '#e74c3c', fontFamily: 'monospace',
+      }).setOrigin(0.5);
+      panel.add(msg);
+    }
+
+    const cancelBtn = this.add.rectangle(0, panelHeight / 2 - 12, 95, 18, 0x7f1d1d, 0.9)
+      .setStrokeStyle(1, 0xdc2626)
+      .setInteractive();
+    const cancelTxt = this.add.text(0, panelHeight / 2 - 12, 'Cancel', {
+      fontSize: '9px', color: '#fca5a5', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    cancelBtn.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      p.event.stopPropagation();
+      this.closePanels();
+    });
+    panel.add([cancelBtn, cancelTxt]);
+
     this.selectionPanel = panel;
+  }
+
+  private showConfirmPanel(slotId: number, towerType: TowerType): void {
+    this.closePanels();
+    const slot = this.activeMap.slots.find(s => s.id === slotId)!;
+    const fb = getPlacementFeedback(this.placementMode, this.state.essence, this.state.towers);
+
+    this.updateGhostRange(slot.x, slot.y, fb.ghostRange, fb.ghostColor);
+
+    const panel = this.add.container(slot.x, slot.y - 60);
+
+    const panelH = fb.showInsufficientEssence ? 80 : 60;
+    const bg = this.add.rectangle(0, 0, 110, panelH, 0x1a1a2e, 0.95)
+      .setStrokeStyle(1, fb.canConfirm ? 0x2ecc71 : 0xe74c3c);
+    panel.add(bg);
+
+    const label = this.add.text(0, -18, towerType.charAt(0).toUpperCase() + towerType.slice(1), {
+      fontSize: '10px', color: '#fff', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    panel.add(label);
+
+    if (fb.showInsufficientEssence) {
+      const msg = this.add.text(0, 2, 'Not enough Essence', {
+        fontSize: '8px', color: '#e74c3c', fontFamily: 'monospace',
+      }).setOrigin(0.5);
+      panel.add(msg);
+    }
+
+    if (fb.canConfirm) {
+      const confirmBtn = this.add.rectangle(0, fb.showInsufficientEssence ? 22 : 5, 95, 18, 0x27ae60, 0.9)
+        .setStrokeStyle(1, 0x2ecc71)
+        .setInteractive();
+      const confirmTxt = this.add.text(0, fb.showInsufficientEssence ? 22 : 5, 'Place', {
+        fontSize: '9px', color: '#fff', fontFamily: 'monospace',
+      }).setOrigin(0.5);
+      confirmBtn.on('pointerdown', (p: Phaser.Input.Pointer) => {
+        p.event.stopPropagation();
+        this.tryPlaceTower(slotId, towerType);
+      });
+      panel.add([confirmBtn, confirmTxt]);
+    }
+
+    const cancelBtn = this.add.rectangle(0, panelH / 2 - 12, 95, 18, 0x7f1d1d, 0.9)
+      .setStrokeStyle(1, 0xdc2626)
+      .setInteractive();
+    const cancelTxt = this.add.text(0, panelH / 2 - 12, 'Cancel', {
+      fontSize: '9px', color: '#fca5a5', fontFamily: 'monospace',
+    }).setOrigin(0.5);
+    cancelBtn.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      p.event.stopPropagation();
+      this.closePanels();
+    });
+    panel.add([cancelBtn, cancelTxt]);
+
+    this.selectionPanel = panel;
+  }
+
+  private updateGhostRange(x: number, y: number, range: number | null, color: number | null): void {
+    this.clearGhostRange();
+    if (range == null || color == null) return;
+    this.ghostRangeCircle = this.add.circle(x, y, range, color, 0.08);
+    this.ghostRangeCircle.setStrokeStyle(1, color, 0.4);
+    this.ghostRangeCircle.setDepth(-1);
+    this.ghostRangePreview = this.add.circle(x, y, 16, color, 0.15);
+    this.ghostRangePreview.setStrokeStyle(2, color, 0.6);
+    this.ghostRangePreview.setDepth(-1);
+  }
+
+  private clearGhostRange(): void {
+    this.ghostRangeCircle?.destroy();
+    this.ghostRangeCircle = null;
+    this.ghostRangePreview?.destroy();
+    this.ghostRangePreview = null;
   }
 
   private showUpgradePanel(tower: PlacedTower): void {
     this.closePanels();
-    this.selectedTowerId = tower.id;
     const towerEntity = this.towerEntities.get(tower.id);
     if (towerEntity) towerEntity.showRange(true);
 
@@ -469,8 +569,8 @@ export class GameScene extends Phaser.Scene {
     this.selectionPanel = null;
     this.upgradePanel?.destroy();
     this.upgradePanel = null;
-    this.selectedSlotId = null;
-    this.selectedTowerId = null;
+    this.placementMode = cancelPlacement(this.placementMode);
+    this.clearGhostRange();
     this.towerEntities.forEach(e => e.showRange(false));
     this.slotHighlights.forEach(h => h.setVisible(false));
   }
