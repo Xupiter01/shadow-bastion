@@ -20,9 +20,12 @@ describe('MapAssetRegistry', () => {
       expect(getMapBackgroundPath(0)).toBeUndefined();
     });
 
-    it('returns undefined for maps without backgrounds', () => {
-      expect(getMapBackgroundPath(2)).toBeUndefined();
-      expect(getMapBackgroundPath(3)).toBeUndefined();
+    it('returns the background path for map 2', () => {
+      expect(getMapBackgroundPath(2)).toBe('assets/maps/map-02-bg.png');
+    });
+
+    it('returns the background path for map 3', () => {
+      expect(getMapBackgroundPath(3)).toBe('assets/maps/map-03-bg.png');
     });
   });
 
@@ -30,6 +33,14 @@ describe('MapAssetRegistry', () => {
     it('returns the texture key for map 1', () => {
       const key = getMapBackgroundKey(1);
       expect(key).toBe('map-01-bg');
+    });
+
+    it('returns the texture key for map 2', () => {
+      expect(getMapBackgroundKey(2)).toBe('map-02-bg');
+    });
+
+    it('returns the texture key for map 3', () => {
+      expect(getMapBackgroundKey(3)).toBe('map-03-bg');
     });
 
     it('returns undefined for an unregistered map', () => {
@@ -40,8 +51,8 @@ describe('MapAssetRegistry', () => {
   describe('getAllMapBackgrounds', () => {
     it('returns entries only for maps with backgrounds', () => {
       const entries = getAllMapBackgrounds();
-      expect(entries.length).toBe(1);
-      expect(entries[0].mapId).toBe(1);
+      expect(entries.length).toBe(3);
+      expect(entries.map(e => e.mapId).sort()).toEqual([1, 2, 3]);
     });
 
     it('entries have valid paths (GitHub Pages-relative, no leading slash)', () => {
